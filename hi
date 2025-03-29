@@ -1,0 +1,179 @@
+npm init -y
+npm install express mongoose bcryptjs jsonwebtoken passport passport-local
+// server.js
+const express = require('express');
+const mongoose = require('mongoose');
+const passport = require('passport');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+
+const app = express();
+const PORT = process.env.PORT || 5000;
+
+app.use(express.json());
+
+// MongoDB connection
+mongoose.connect('mongodb://localhost/vibecircle', { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => console.log('MongoDB Connected'))
+  .catch(err => console.log(err));
+
+// User Schema
+const UserSchema = new mongoose.Schema({
+  username: { type: String, required: true },
+  password: { type: String, required: true },
+});
+
+const User = mongoose.model('User', UserSchema);
+
+// Register Route
+app.post('/register', async (req, res) => {
+  const { username, password } = req.body;
+
+  // Check if user exists
+  const user = await User.findOne({ username });
+  if (user) return res.status(400).json({ msg: 'User already exists' });
+
+  const salt = await bcrypt.genSalt(10);
+  const hashedPassword = await bcrypt.hash(password, salt);
+
+  const newUser = new User({
+    username,
+    password: hashedPassword,
+  });
+
+  await newUser.save();
+  res.json({ msg: 'User registered successfully' });
+});
+
+// Login Route
+app.post('/login', async (req, res) => {
+  const { username, password } = req.body;
+
+  const user = await User.findOne({ username });
+  if (!user) return res.status(400).json({ msg: 'User does not exist' });
+
+  const isMatch = await bcrypt.compare(password, user.password);
+  if (!isMatch) return res.status(400).json({ msg: 'Invalid credentials' });
+
+  const token = jwt.sign({ id: user.id }, 'secret', { expiresIn: '1h' });
+  res.json({ token });
+});
+
+// Protected Route (Example for posts)
+app.get('/profile', passport.authenticate('jwt', { session: false }), (req, res) => {
+  res.json({ msg: 'This is a protected route!' });
+});
+
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// models/MoodPost.js
+const mongoose = require('mongoose');
+
+const MoodPostSchema = new mongoose.Schema({
+  content: { type: String, required: true },
+  mood: { type: String, required: true }, // "happy", "anxious", etc.
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  createdAt: { type: Date, default: Date.now },
+});
+
+const MoodPost = mongoose.model('MoodPost', MoodPostSchema);
+
+module.exports = MoodPost;
+// server.js (Add to the existing code)
+const MoodPost = require('./models/MoodPost');
+
+// Create Mood-Based Post
+app.post('/create-post', passport.authenticate('jwt', { session: false }), async (req, res) => {
+  const { content, mood } = req.body;
+
+  const newPost = new MoodPost({
+    content,
+    mood,
+    user: req.user.id,
+  });
+
+  await newPost.save();
+  res.json(newPost);
+});
+
+// Get all posts by mood
+app.get('/posts/:mood', async (req, res) => {
+  const { mood } = req.params;
+
+  const posts = await MoodPost.find({ mood }).populate('user', 'username');
+  res.json(posts);
+});
+npx create-react-app vibecircle-client
+cd vibecircle-client
+npm install axios react-router-dom
+// src/components/CreatePost.js
+import React, { useState } from 'react';
+import axios from 'axios';
+
+const CreatePost = ({ token }) => {
+  const [content, setContent] = useState('');
+  const [mood, setMood] = useState('');
+
+  const handlePostSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await axios.post(
+        'http://localhost:5000/create-post',
+        { content, mood },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      console.log('Post Created:', res.data);
+      setContent('');
+      setMood('');
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  return (
+    <div>
+      <h2>Create a Post</h2>
+      <form onSubmit={handlePostSubmit}>
+        <textarea
+          placeholder="What's on your mind?"
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+        />
+        <select value={mood} onChange={(e) => setMood(e.target.value)}>
+          <option value="">Select Mood</option>
+          <option value="happy">Happy</option>
+          <option value="anxious">Anxious</option>
+          <option value="chill">Chill</option>
+          <option value="inspired">Inspired</option>
+        </select>
+        <button type="submit">Post</button>
+      </form>
+    </div>
+  );
+};
+
+export default CreatePost;
+// src/App.js
+import React, { useState } from 'react';
+import { BrowserRouter as Router, Route, Switch } from 'react-router-dom';
+import CreatePost from './components/CreatePost';
+
+function App() {
+  const [token, setToken] = useState(localStorage.getItem('token'));
+
+  return (
+    <Router>
+      <div className="App">
+        <Switch>
+          <Route path="/create-post">
+            {token ? <CreatePost token={token} /> : <p>Please login to create posts.</p>}
+          </Route>
+          {/* Add other routes here */}
+        </Switch>
+      </div>
+    </Router>
+  );
+}
+
+export default App;
